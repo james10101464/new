@@ -1,37 +1,34 @@
-import http.server
-import urllib.request
+from flask import Flask, request, Response
+import requests
 import os
 
-PORT = int(os.environ.get("PORT", 8080))
+app = Flask(__name__)
 
-class Proxy(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        try:
-            # Build full URL
-            host = self.headers.get("Host")
-            if not host:
-                self.send_error(400, "No Host header")
-                return
+@app.route("/")
+def index():
+    return '''
+    <form method="get" action="/proxy">
+      <input type="text" name="url" placeholder="Enter URL" style="width:300px;">
+      <button type="submit">Go</button>
+    </form>
+    '''
 
-            url = f"http://{host}{self.path}"
-            print(f"Fetching: {url}")
+@app.route("/proxy")
+def proxy():
+    url = request.args.get("url")
+    if not url:
+        return "No URL given", 400
+    if not url.startswith("http"):
+        url = "http://" + url
 
-            with urllib.request.urlopen(url) as resp:
-                self.send_response(resp.status)
-                for header, value in resp.getheaders():
-                    if header.lower() != "transfer-encoding":
-                        self.send_header(header, value)
-                self.end_headers()
-                self.wfile.write(resp.read())
-
-        except Exception as e:
-            self.send_error(502, f"Proxy error: {e}")
-
-    def do_CONNECT(self):
-        # Browsers need this for HTTPS sites
-        self.send_error(501, "HTTPS CONNECT not implemented yet")
+    try:
+        resp = requests.get(url)
+        excluded = ["content-encoding", "content-length", "transfer-encoding", "connection"]
+        headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded]
+        return Response(resp.content, resp.status_code, headers)
+    except Exception as e:
+        return f"Error: {e}", 502
 
 if __name__ == "__main__":
-    server = http.server.HTTPServer(("0.0.0.0", PORT), Proxy)
-    print(f"Proxy server running on port {PORT}")
-    server.serve_forever()
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
